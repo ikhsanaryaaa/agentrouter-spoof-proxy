@@ -9,7 +9,11 @@ services:
     networks:
       - dokploy-network
     env_file:
-      - .env
+      # Absolute path: Dokploy always writes the generated .env next to the
+      # compose file under /etc/dokploy/compose/<appName>/code/. A relative
+      # '.env' resolves against --project-directory, which the runner may
+      # set elsewhere, silently loading nothing. Absolute cannot miss.
+      - /etc/dokploy/compose/ai-agentrouterfix-ombube/code/.env
     healthcheck:
       test:
         - CMD
