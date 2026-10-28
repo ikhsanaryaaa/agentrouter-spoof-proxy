@@ -9,8 +9,7 @@ services:
     networks:
       - dokploy-network
     env_file:
-      - path: .env
-        required: false
+      - .env
     healthcheck:
       test:
         - CMD
