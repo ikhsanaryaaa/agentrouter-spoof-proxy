@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewDiscoveryStatic(t *testing.T) {
-	d := NewDiscovery([]string{"claude-opus-4-8", "claude-opus-5", "deepseek-v4-flash", "glm-5.3", " gpt-5.6-sol "})
+	d := NewDiscovery([]string{"claude-opus-4-8", "claude-opus-5", "deepseek-v4-flash", "glm-5.3", " gpt-5.6-sol "}, "opencode")
 	if got := d.Source(); got != "static" {
 		t.Fatalf("Source() = %q, want static", got)
 	}
@@ -37,7 +37,7 @@ func TestNewDiscoveryStatic(t *testing.T) {
 }
 
 func TestDiscoveryListReturnsCopy(t *testing.T) {
-	d := NewDiscovery([]string{"a", "b"})
+	d := NewDiscovery([]string{"a", "b"}, "opencode")
 	got := d.List()
 	got[0].ID = "MUTATED"
 	if d.List()[0].ID == "MUTATED" {
@@ -54,7 +54,7 @@ func TestDiscoveryNoKeySkipsFetch(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), srv.Client(), host, port, "")
 	if called.Load() {
 		t.Fatal("Fetch with empty apiKey must not contact the upstream")
@@ -81,7 +81,7 @@ func TestDiscoveryDynamicSuccess(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), srv.Client(), host, port, "test-key")
 
 	if got := d.Source(); got != "dynamic" {
@@ -90,8 +90,8 @@ func TestDiscoveryDynamicSuccess(t *testing.T) {
 	if authHeader != "Bearer test-key" {
 		t.Errorf("Authorization = %q, want Bearer test-key", authHeader)
 	}
-	if uaHeader != "agentrouter-spoof-proxy/1.0" {
-		t.Errorf("User-Agent = %q, want agentrouter-spoof-proxy/1.0", uaHeader)
+	if uaHeader != "opencode/1.18.25" {
+		t.Errorf("User-Agent = %q, want the spoofed opencode identity, not a proxy-specific one", uaHeader)
 	}
 	list := d.List()
 	if len(list) != 2 {
@@ -113,7 +113,7 @@ func TestDiscoveryDynamicEmptyArray(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), srv.Client(), host, port, "key")
 	if got := d.Source(); got != "dynamic" {
 		t.Fatalf("Source() = %q, want dynamic (empty array is a valid dynamic list)", got)
@@ -130,7 +130,7 @@ func TestDiscoveryFallsBackOnError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1", "static-2"})
+	d := NewDiscovery([]string{"static-1", "static-2"}, "opencode")
 
 	// A failing upstream must leave the discovery on the static list.
 	d.Fetch(context.Background(), srv.Client(), host, port, "key")
@@ -156,7 +156,7 @@ func TestDiscoveryFailureAfterDynamicRestoresStatic(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), srv.Client(), host, port, "key")
 	if got := d.Source(); got != "dynamic" {
 		t.Fatalf("Source() = %q, want dynamic", got)
@@ -182,7 +182,7 @@ func TestDiscoveryFallsBackOnBadJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host, port := splitHostPort(t, srv.URL)
 
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), srv.Client(), host, port, "key")
 	if got := d.Source(); got != "static" {
 		t.Fatalf("Source() = %q, want static after bad JSON", got)
@@ -198,7 +198,7 @@ func TestDiscoveryFallsBackOnNetworkError(t *testing.T) {
 	srv.Close() // connection refused
 
 	host, port := splitHostPort(t, url)
-	d := NewDiscovery([]string{"static-1"})
+	d := NewDiscovery([]string{"static-1"}, "opencode")
 	d.Fetch(context.Background(), &http.Client{}, host, port, "key")
 	if got := d.Source(); got != "static" {
 		t.Fatalf("Source() = %q, want static after network error", got)

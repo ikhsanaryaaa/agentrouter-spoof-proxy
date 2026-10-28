@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/trefeon/agentrouter-spoof-proxy/internal/auth"
 )
 
 // staticCreated is the epoch for static models, matching
@@ -29,15 +31,16 @@ type Model struct {
 // Discovery holds the current model list and its source (static or dynamic).
 // Mirrors src/models/discovery.mjs.
 type Discovery struct {
-	mu         sync.RWMutex
-	list       []Model
-	source     string
-	staticList []Model // snapshot of the static list, restored on any fetch failure
+	mu           sync.RWMutex
+	list         []Model
+	source       string
+	staticList   []Model // snapshot of the static list, restored on any fetch failure
+	spoofProfile string  // client identity the upstream WAF expects
 }
 
 // NewDiscovery seeds Discovery with the static list (object model, created
 // 1626777600, owned_by agentrouter).
-func NewDiscovery(staticIDs []string) *Discovery {
+func NewDiscovery(staticIDs []string, spoofProfile string) *Discovery {
 	static := make([]Model, 0, len(staticIDs))
 	for _, id := range staticIDs {
 		static = append(static, Model{
@@ -47,9 +50,12 @@ func NewDiscovery(staticIDs []string) *Discovery {
 			OwnedBy: "agentrouter",
 		})
 	}
+	if spoofProfile == "" {
+		spoofProfile = "opencode"
+	}
 	list := make([]Model, len(static))
 	copy(list, static)
-	return &Discovery{list: list, source: "static", staticList: static}
+	return &Discovery{list: list, source: "static", staticList: static, spoofProfile: spoofProfile}
 }
 
 // List returns a copy of the current list.
@@ -87,7 +93,12 @@ func (d *Discovery) Fetch(ctx context.Context, client *http.Client, host string,
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("User-Agent", "agentrouter-spoof-proxy/1.0")
+	// The upstream WAF challenges unknown User-Agents with an HTML page, which
+	// makes the JSON decoder fail with "invalid character '<'". Reuse the same
+	// spoofed client identity the chat handler sends so discovery is treated
+	// as a legitimate client too. HeadersForProfile is exported from auth and
+	// takes (profile, isAnthropic); /v1/models is an OpenAI route.
+	req.Header.Set("User-Agent", auth.SpoofHeadersForProfile(d.spoofProfile)["User-Agent"])
 	req.Header.Set("Accept", "application/json")
 
 	c := clientWithTimeout(client, 15*time.Second)
