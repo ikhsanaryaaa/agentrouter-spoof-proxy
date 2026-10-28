@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: deploy/Dockerfile
     container_name: agentrouter-proxy
-     expose:
+    expose:
       - "${LISTEN_PORT:-8318}"
     networks:
       - dokploy-network
