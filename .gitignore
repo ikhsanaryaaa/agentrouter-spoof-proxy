@@ -77,3 +77,4 @@ bin/
 
 # Go toolchain cache (local only)
 .golangci-cache/
+.env.dokploy
