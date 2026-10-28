@@ -503,7 +503,7 @@ func TestHandlerUpstreamAPIKeyOverridesClientAuth(t *testing.T) {
 }
 
 // Without UPSTREAM_API_KEY the client credential passes through unchanged
-// (unchanged legacy behavior, single-token deployments).
+// (legacy single-token deployments).
 func TestHandlerNoUpstreamAPIKeyForwardsClientAuth(t *testing.T) {
 	var gotAuth string
 	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

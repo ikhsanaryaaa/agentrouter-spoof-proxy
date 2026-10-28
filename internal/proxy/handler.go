@@ -154,12 +154,12 @@ func (h *Handler) ServeProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders.Set(k, v)
 	}
 	upstreamHeaders.Set("Content-Type", "application/json")
-	// UPSTREAM_API_KEY is the credential agentrouter.org accepts. When it is
-	// set it WINS over whatever the client sent, which is what lets the proxy
-	// keep an inbound gate (PROXY_AUTH_TOKEN) while still authenticating
-	// upstream: the client sends the proxy token, the upstream sees the real
-	// AgentRouter key. Without it the client's own Authorization/x-api-key is
-	// forwarded verbatim (single-token deployments keep working).
+	// UPSTREAM_API_KEY is the credential the upstream accepts. When set it
+	// WINS over whatever the client sent, which is what lets the proxy keep
+	// an inbound gate (PROXY_AUTH_TOKEN) while still authenticating upstream:
+	// the client sends the proxy token, the upstream sees the real key.
+	// Without it the client's own Authorization/x-api-key is forwarded
+	// verbatim, so single-token deployments keep working unchanged.
 	if u := h.Cfg.UpstreamAPIKey; u != "" {
 		upstreamHeaders.Set("Authorization", "Bearer "+u)
 		upstreamHeaders.Set("x-api-key", u)
