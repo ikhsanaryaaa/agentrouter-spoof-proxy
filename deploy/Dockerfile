@@ -15,6 +15,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/proxy /proxy
 EXPOSE 8318
+# Exec-form healthchecks run as the bare argv with no ENTRYPOINT prefix, so
+# this must name the binary explicitly. CMD ["-healthcheck"] made the runtime
+# look for a program literally called "-healthcheck", which exited 127 every
+# time and left every container "unhealthy" despite a working server.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["-healthcheck"]
+  CMD ["/proxy", "-healthcheck"]
 ENTRYPOINT ["/proxy"]
