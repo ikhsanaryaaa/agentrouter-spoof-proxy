@@ -59,7 +59,7 @@ func testHandler(cfg *config.Config) (*Handler, *auth.Store, *resilience.Breaker
 	breaker := resilience.NewBreaker()
 	health := models.NewHealth()
 	recorder := models.NewRecorder(cfg.SlowResponseMs)
-	discovery := models.NewDiscovery(cfg.StaticModelIDs(), "opencode")
+	discovery := models.NewDiscovery(cfg.StaticModelIDs(), "opencode", nil)
 	client := &http.Client{Transport: cfg.Transport()}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := NewHandler(cfg, wafStore, breaker, discovery, health, recorder, client, logger, nil)

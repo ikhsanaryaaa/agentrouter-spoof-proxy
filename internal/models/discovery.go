@@ -36,11 +36,12 @@ type Discovery struct {
 	source       string
 	staticList   []Model // snapshot of the static list, restored on any fetch failure
 	spoofProfile string  // client identity the upstream WAF expects
+	cookieFn     func() string // supplies the current WAF cookie string; may be nil
 }
 
 // NewDiscovery seeds Discovery with the static list (object model, created
 // 1626777600, owned_by agentrouter).
-func NewDiscovery(staticIDs []string, spoofProfile string) *Discovery {
+func NewDiscovery(staticIDs []string, spoofProfile string, cookieFn func() string) *Discovery {
 	static := make([]Model, 0, len(staticIDs))
 	for _, id := range staticIDs {
 		static = append(static, Model{
@@ -55,7 +56,7 @@ func NewDiscovery(staticIDs []string, spoofProfile string) *Discovery {
 	}
 	list := make([]Model, len(static))
 	copy(list, static)
-	return &Discovery{list: list, source: "static", staticList: static, spoofProfile: spoofProfile}
+	return &Discovery{list: list, source: "static", staticList: static, spoofProfile: spoofProfile, cookieFn: cookieFn}
 }
 
 // List returns a copy of the current list.
@@ -100,6 +101,16 @@ func (d *Discovery) Fetch(ctx context.Context, client *http.Client, host string,
 	// takes (profile, isAnthropic); /v1/models is an OpenAI route.
 	req.Header.Set("User-Agent", auth.SpoofHeadersForProfile(d.spoofProfile)["User-Agent"])
 	req.Header.Set("Accept", "application/json")
+	// The upstream WAF (acw_tc) scores per IP+UA+cookies. Datacenter IPs get an
+	// HTML challenge for cookieless requests even with a spoofed UA — which the
+	// JSON decoder reports as "invalid character '<'". Chat requests carry the
+	// WAF cookies from the shared store; discovery must too. The supplier is
+	// read per-fetch so rotated cookies are picked up on every cycle.
+	if d.cookieFn != nil {
+		if c := d.cookieFn(); c != "" {
+			req.Header.Set("Cookie", c)
+		}
+	}
 
 	c := clientWithTimeout(client, 15*time.Second)
 	resp, err := c.Do(req)

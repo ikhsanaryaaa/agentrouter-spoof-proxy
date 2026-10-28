@@ -61,7 +61,7 @@ func New(cfg *config.Config) *Server {
 	wafStore := auth.NewStore()
 	wafStore.SetTarget(cfg.TargetProto, cfg.TargetHost, cfg.TargetPort)
 	breaker := resilience.NewBreaker()
-	discovery := models.NewDiscovery(cfg.StaticModelIDs(), cfg.NormalizedSpoofProfile())
+	discovery := models.NewDiscovery(cfg.StaticModelIDs(), cfg.NormalizedSpoofProfile(), wafStore.Get)
 	health := models.NewHealth()
 	recorder := models.NewRecorder(cfg.SlowResponseMs)
 	client := &http.Client{Transport: cfg.Transport()}
