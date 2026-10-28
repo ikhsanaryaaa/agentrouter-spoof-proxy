@@ -4,8 +4,10 @@ services:
       context: .
       dockerfile: deploy/Dockerfile
     container_name: agentrouter-proxy
-    ports:
-      - "${LISTEN_PORT:-8318}:${LISTEN_PORT:-8318}"
+     expose:
+      - "${LISTEN_PORT:-8318}"
+    networks:
+      - dokploy-network
     env_file:
       - path: .env
         required: false
@@ -55,3 +57,6 @@ services:
       - net.ipv4.tcp_keepalive_intvl=10
       - net.ipv4.tcp_keepalive_probes=3
     restart: unless-stopped
+networks:
+  dokploy-network:
+    external: true
