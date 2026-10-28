@@ -470,6 +470,59 @@ func TestHandlerHeaderForwarding(t *testing.T) {
 	}
 }
 
+// UpstreamAPIKey overrides whatever credential the client sent, so a proxy
+// gated by PROXY_AUTH_TOKEN still authenticates at the upstream. This is the
+// two-secret deployment: client sends the proxy token, upstream sees the real
+// AgentRouter key.
+func TestHandlerUpstreamAPIKeyOverridesClientAuth(t *testing.T) {
+	var gotAuth, gotAPIKey string
+	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	cfg.ProxyAuthToken = "proxy-gate-token"
+	cfg.UpstreamAPIKey = "sk-real-agentrouter-key"
+	h, _, _, _, _ := testHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"m1"}`)))
+	req.Header.Set("Authorization", "Bearer proxy-gate-token")
+	rec := httptest.NewRecorder()
+	h.ServeProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer sk-real-agentrouter-key" {
+		t.Errorf("Authorization = %q, want the upstream key, not the proxy gate token", gotAuth)
+	}
+	if gotAPIKey != "sk-real-agentrouter-key" {
+		t.Errorf("x-api-key = %q, want the upstream key", gotAPIKey)
+	}
+}
+
+// Without UPSTREAM_API_KEY the client credential passes through unchanged
+// (legacy single-token deployments).
+func TestHandlerNoUpstreamAPIKeyForwardsClientAuth(t *testing.T) {
+	var gotAuth string
+	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	h, _, _, _, _ := testHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"m1"}`)))
+	req.Header.Set("Authorization", "Bearer sk-client-key")
+	rec := httptest.NewRecorder()
+	h.ServeProxy(rec, req)
+
+	if gotAuth != "Bearer sk-client-key" {
+		t.Errorf("Authorization = %q, want client key passthrough", gotAuth)
+	}
+}
+
 // Non-200 passthrough forwards status + body.
 func TestHandlerNon200Passthrough(t *testing.T) {
 	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

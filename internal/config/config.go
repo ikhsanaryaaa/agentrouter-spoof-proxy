@@ -53,6 +53,7 @@ type Config struct {
 
 	ModelsCSV          string `env:"MODELS_CSV" envDefault:"claude-opus-4-8,claude-opus-5,deepseek-v4-flash,glm-5.3,gpt-5.6-sol,gpt-6-astra"`
 	ARAPIKey           string `env:"AR_API_KEY"`
+	UpstreamAPIKey     string `env:"UPSTREAM_API_KEY"`
 	InjectSystemPrompt string `env:"INJECT_SYSTEM_PROMPT"`
 	ProxyAuthToken     string `env:"PROXY_AUTH_TOKEN"`
 	SpoofProfile       string `env:"SPOOF_PROFILE" envDefault:"opencode"`

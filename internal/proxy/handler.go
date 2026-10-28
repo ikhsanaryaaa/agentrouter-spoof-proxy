@@ -154,11 +154,22 @@ func (h *Handler) ServeProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders.Set(k, v)
 	}
 	upstreamHeaders.Set("Content-Type", "application/json")
-	if a := r.Header.Get("Authorization"); a != "" {
-		upstreamHeaders.Set("Authorization", a)
-	}
-	if k := r.Header.Get("x-api-key"); k != "" {
-		upstreamHeaders.Set("x-api-key", k)
+	// UPSTREAM_API_KEY is the credential the upstream accepts. When set it
+	// WINS over whatever the client sent, which is what lets the proxy keep
+	// an inbound gate (PROXY_AUTH_TOKEN) while still authenticating upstream:
+	// the client sends the proxy token, the upstream sees the real key.
+	// Without it the client's own Authorization/x-api-key is forwarded
+	// verbatim, so single-token deployments keep working unchanged.
+	if u := h.Cfg.UpstreamAPIKey; u != "" {
+		upstreamHeaders.Set("Authorization", "Bearer "+u)
+		upstreamHeaders.Set("x-api-key", u)
+	} else {
+		if a := r.Header.Get("Authorization"); a != "" {
+			upstreamHeaders.Set("Authorization", a)
+		}
+		if k := r.Header.Get("x-api-key"); k != "" {
+			upstreamHeaders.Set("x-api-key", k)
+		}
 	}
 	if c := h.WAF.Get(); c != "" {
 		upstreamHeaders.Set("Cookie", c)
