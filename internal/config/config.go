@@ -176,6 +176,14 @@ func ms(v int) time.Duration { return time.Duration(v) * time.Millisecond }
 // http.Agent, no HTTP/2. That avoids SSE buffering surprises.
 func (c *Config) Transport() *http.Transport {
 	return &http.Transport{
+		// Honor the standard HTTP(S)_PROXY/NO_PROXY environment variables.
+		// On hosts whose IP the upstream WAF challenges (e.g. datacenter IPs
+		// behind Alibaba WAF JS challenges), routing the outbound leg through
+		// an egress proxy is the escape hatch: set HTTPS_PROXY in the
+		// container env and every upstream request goes through it. With no
+		// proxy env set, ProxyFromEnvironment is a no-op and behavior is
+		// identical to a direct connection.
+		Proxy:               http.ProxyFromEnvironment,
 		MaxConnsPerHost:     64,
 		MaxIdleConnsPerHost: 16,
 		IdleConnTimeout:     90 * time.Second,
