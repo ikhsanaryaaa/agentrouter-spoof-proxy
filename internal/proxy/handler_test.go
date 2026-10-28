@@ -470,6 +470,59 @@ func TestHandlerHeaderForwarding(t *testing.T) {
 	}
 }
 
+// UpstreamAPIKey overrides whatever credential the client sent, so a proxy
+// gated by PROXY_AUTH_TOKEN still authenticates at the upstream. This is the
+// two-secret deployment: client sends the proxy token, upstream sees the real
+// AgentRouter key.
+func TestHandlerUpstreamAPIKeyOverridesClientAuth(t *testing.T) {
+	var gotAuth, gotAPIKey string
+	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	cfg.ProxyAuthToken = "proxy-gate-token"
+	cfg.UpstreamAPIKey = "sk-real-agentrouter-key"
+	h, _, _, _, _ := testHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"m1"}`)))
+	req.Header.Set("Authorization", "Bearer proxy-gate-token")
+	rec := httptest.NewRecorder()
+	h.ServeProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer sk-real-agentrouter-key" {
+		t.Errorf("Authorization = %q, want the upstream key, not the proxy gate token", gotAuth)
+	}
+	if gotAPIKey != "sk-real-agentrouter-key" {
+		t.Errorf("x-api-key = %q, want the upstream key", gotAPIKey)
+	}
+}
+
+// Without UPSTREAM_API_KEY the client credential passes through unchanged
+// (unchanged legacy behavior, single-token deployments).
+func TestHandlerNoUpstreamAPIKeyForwardsClientAuth(t *testing.T) {
+	var gotAuth string
+	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	h, _, _, _, _ := testHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader([]byte(`{"model":"m1"}`)))
+	req.Header.Set("Authorization", "Bearer sk-client-key")
+	rec := httptest.NewRecorder()
+	h.ServeProxy(rec, req)
+
+	if gotAuth != "Bearer sk-client-key" {
+		t.Errorf("Authorization = %q, want client key passthrough", gotAuth)
+	}
+}
+
 // Non-200 passthrough forwards status + body.
 func TestHandlerNon200Passthrough(t *testing.T) {
 	cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -565,52 +618,6 @@ func TestHandlerSensitiveWordsNoHealthPenalty(t *testing.T) {
 		t.Errorf("breaker fails = %d, want 0 (filter rejection neither fails nor resets)", fails)
 	}
 	h.assertActive(t, 0)
-}
-
-// Deterministic non-outage rejections (402 quota, 503 no-channel, 400
-// content-blocked) are passed to the caller for fallback: never retried,
-// never a health mark, never a breaker failure.
-func TestHandlerDeterministicNoHealthPenalty(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		body   string
-	}{
-		{"402 budget quota", http.StatusPaymentRequired, `{"error":{"message":"Budget pool quota has been exhausted.","type":"new_api_error"}}`},
-		{"503 no channel", http.StatusServiceUnavailable, `{"error":{"message":"当前分组 default 下对于模型 glm-5.3 无可用渠道","type":"new_api_error"}}`},
-		{"400 content-blocked", http.StatusBadRequest, `{"error":{"code":"content-blocked","message":"content-blocked","param":"","type":"agent_router_api_error"}}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var mu atomic.Int64
-			cfg := testUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.status)
-				_, _ = io.WriteString(w, tc.body)
-			}))
-			// testUpstream sets RetryOn5xx=true: exactly 1 upstream POST
-			// proves a deterministic rejection is never retried.
-			h, _, breaker, health, _ := testHandler(cfg)
-			rec := proxyRequest(t, h, http.MethodPost, "/v1/messages", `{"model":"m1","messages":[]}`, nil)
-			if rec.Code != tc.status {
-				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
-			}
-			if rec.Body.String() != tc.body {
-				t.Errorf("body = %q, want intact passthrough", rec.Body.String())
-			}
-			if got := mu.Load(); got != 1 {
-				t.Errorf("upstream POSTs = %d, want 1 (no retry on deterministic rejection)", got)
-			}
-			if !health.IsHealthy("m1") {
-				t.Error("model must stay healthy after an account-side rejection")
-			}
-			if fails := breaker.ConsecutiveFails(); fails != 0 {
-				t.Errorf("breaker fails = %d, want 0 (account-side rejection neither fails nor resets)", fails)
-			}
-			h.assertActive(t, 0)
-		})
-	}
 }
 
 // Client context cancellation aborts the request without a failure response.

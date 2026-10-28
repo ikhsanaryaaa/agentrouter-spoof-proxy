@@ -154,11 +154,22 @@ func (h *Handler) ServeProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders.Set(k, v)
 	}
 	upstreamHeaders.Set("Content-Type", "application/json")
-	if a := r.Header.Get("Authorization"); a != "" {
-		upstreamHeaders.Set("Authorization", a)
-	}
-	if k := r.Header.Get("x-api-key"); k != "" {
-		upstreamHeaders.Set("x-api-key", k)
+	// UPSTREAM_API_KEY is the credential agentrouter.org accepts. When it is
+	// set it WINS over whatever the client sent, which is what lets the proxy
+	// keep an inbound gate (PROXY_AUTH_TOKEN) while still authenticating
+	// upstream: the client sends the proxy token, the upstream sees the real
+	// AgentRouter key. Without it the client's own Authorization/x-api-key is
+	// forwarded verbatim (single-token deployments keep working).
+	if u := h.Cfg.UpstreamAPIKey; u != "" {
+		upstreamHeaders.Set("Authorization", "Bearer "+u)
+		upstreamHeaders.Set("x-api-key", u)
+	} else {
+		if a := r.Header.Get("Authorization"); a != "" {
+			upstreamHeaders.Set("Authorization", a)
+		}
+		if k := r.Header.Get("x-api-key"); k != "" {
+			upstreamHeaders.Set("x-api-key", k)
+		}
 	}
 	if c := h.WAF.Get(); c != "" {
 		upstreamHeaders.Set("Cookie", c)
@@ -354,27 +365,25 @@ func (h *Handler) doRequest(w http.ResponseWriter, r *http.Request, body []byte,
 			continue // WAF retried; next attempt
 		}
 
-		// Deterministic non-outage rejections are client/account-side, not an
-		// upstream outage: content-filter responses (5xx sensitive_words, 400
-		// content-blocked) and account-side responses (402 quota, 503
-		// no-channel). Never retry, never mark model health, breaker
-		// neither-fails-nor-succeeds (mirror the 4xx accounting below) so the
-		// caller (9Router) handles fallback. The body is buffered and restored
-		// so forwardNon200 passes the status + body through intact and stats
-		// still record. ResponseHasEmptyOutput only fires on 200, so an exempt
-		// hit leaves zero health marks by construction.
-		noPenalty := false
-		if (status >= 500 && status <= 599) || status == http.StatusPaymentRequired || status == http.StatusBadRequest {
+		// Deterministic content-filter rejections (5xx + sensitive_words) are
+		// client-side, not an upstream outage: never retry, never mark model
+		// health, breaker neither-fails-nor-succeeds (mirror the 4xx
+		// accounting below). The body is buffered and restored so
+		// forwardNon200 passes the status + body through intact and stats
+		// still record. ResponseHasEmptyOutput only fires on 200, so a
+		// filter hit leaves zero health marks by construction.
+		contentFilter := false
+		if status >= 500 && status <= 599 {
 			raw, readErr := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			if readErr == nil && (IsContentFilterRejection(status, raw) || IsAccountSideRejection(status, raw)) {
-				noPenalty = true
+			if readErr == nil && IsContentFilterRejection(status, raw) {
+				contentFilter = true
 			}
 			resp.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 
 		// 5xx retry, if exhausted, mark model unhealthy.
-		if !noPenalty && IsRetryable(status, "", h.Cfg.RetryOn5xx) && attempt < h.Cfg.MaxRetries {
+		if !contentFilter && IsRetryable(status, "", h.Cfg.RetryOn5xx) && attempt < h.Cfg.MaxRetries {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 			h.Log.Info(fmt.Sprintf("%s %s <- %d, retrying (%d/%d)...", method, rawPath, status, attempt+1, h.Cfg.MaxRetries))
@@ -388,15 +397,14 @@ func (h *Handler) doRequest(w http.ResponseWriter, r *http.Request, body []byte,
 		if status == http.StatusTooManyRequests {
 			h.Health.MarkExhausted(model)
 		}
-		if status >= 500 && !noPenalty {
+		if status >= 500 && !contentFilter {
 			h.Health.MarkFailed(model, status)
 		}
 
 		// Circuit accounting for a *final* upstream response: 5xx → failure,
 		// 429 → neither (model lockout only), 4xx → neither, <400 → success.
-		// Content-filter and account-side rejections → neither (deterministic,
-		// handled by the caller).
-		if status >= 500 && !noPenalty {
+		// Content-filter 5xx → neither (deterministic client-side rejection).
+		if status >= 500 && !contentFilter {
 			h.Breaker.RecordFailure()
 		} else if status < 400 {
 			h.Breaker.RecordSuccess()

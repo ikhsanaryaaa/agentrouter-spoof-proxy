@@ -31,6 +31,10 @@ services:
       - MAX_RETRIES=${MAX_RETRIES:-2}
       - RETRY_DELAY_MS=${RETRY_DELAY_MS:-1000}
       - AR_API_KEY=${AR_API_KEY:-}
+      # Outbound credential: the real agentrouter.org API key. Lets the proxy
+      # keep an inbound gate (PROXY_AUTH_TOKEN) while still authenticating
+      # upstream. Without it, 9Router's API Key must BE the AgentRouter key.
+      - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-}
       - DISCOVERY_INTERVAL_MS=${DISCOVERY_INTERVAL_MS:-600000}
       - INJECT_SYSTEM_PROMPT=${INJECT_SYSTEM_PROMPT:-}
       - SSE_IDLE_TIMEOUT_MS=${SSE_IDLE_TIMEOUT_MS:-600000}
